@@ -26,6 +26,7 @@
     --seg-thumb: #FFFFFF;
     --blur-bg: rgba(242,242,247,.72);
     --input-bg: rgba(118,118,128,.12);
+    --card-drag: rgba(255,255,255,.78);
     --shadow: 0 1px 2px rgba(0,0,0,.04), 0 8px 24px rgba(0,0,0,.06);
     --ring-track: rgba(60,60,67,.12);
   }
@@ -46,6 +47,7 @@
     --seg-thumb: #636366;
     --blur-bg: rgba(0,0,0,.65);
     --input-bg: rgba(118,118,128,.24);
+    --card-drag: rgba(58,58,62,.75);
     --shadow: 0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.4);
     --ring-track: rgba(235,235,245,.14);
   }
@@ -220,13 +222,18 @@
     transition: none !important;
     position: relative;
     z-index: 10;
+    overflow: visible;   /* 角丸と影がクリップされないように */
   }
+  .row.dragging .swipe-del { display: none; }
   .row.dragging .swipe-content {
     border-radius: 14px;
     border-top: none !important;
-    transform: scale(1.03);
-    box-shadow: 0 12px 32px rgba(0,0,0,.3);
-    transition: transform .15s ease, box-shadow .15s ease;
+    transform: scale(1.04);
+    background: var(--card-drag);
+    -webkit-backdrop-filter: blur(14px) saturate(1.6);
+    backdrop-filter: blur(14px) saturate(1.6);
+    box-shadow: 0 12px 32px rgba(0,0,0,.28);
+    transition: transform .15s ease, box-shadow .15s ease, background .15s ease;
   }
 
   .swipe-content {
