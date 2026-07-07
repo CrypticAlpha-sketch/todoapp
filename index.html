@@ -66,6 +66,7 @@
     transition: background .3s ease;
     user-select: none;
     -webkit-user-select: none;
+    -webkit-touch-callout: none;
   }
 
   /* ================= Header ================= */
@@ -202,6 +203,7 @@
     from { opacity: 0; transform: translateY(8px); }
     to   { opacity: 1; transform: none; }
   }
+  .group.no-anim .row { animation: none; }
   .row.removing {
     animation: collapse .28s ease forwards;
   }
@@ -210,6 +212,22 @@
   }
   .row { max-height: 200px; }
   .row + .row .swipe-content { border-top: 0.5px solid var(--separator); }
+
+  /* ---- ドラッグ並べ替え ---- */
+  .group.reordering { overflow: visible; }
+  .group.reordering .row { transition: transform .22s cubic-bezier(.3,1,.4,1); }
+  .row.dragging {
+    transition: none !important;
+    position: relative;
+    z-index: 10;
+  }
+  .row.dragging .swipe-content {
+    border-radius: 14px;
+    border-top: none !important;
+    transform: scale(1.03);
+    box-shadow: 0 12px 32px rgba(0,0,0,.3);
+    transition: transform .15s ease, box-shadow .15s ease;
+  }
 
   .swipe-content {
     position: relative;
@@ -385,6 +403,8 @@
   let filter = "all";
   let themeMode = "auto"; // auto | light | dark
   let openRow = null;     // 現在スワイプで開いている行
+  let reordering = false; // ドラッグ並べ替え中
+  let justDragged = 0;    // ドラッグ直後の誤タップ防止用タイムスタンプ
 
   /* ---------- ストレージ層 ---------- */
   const store = {
@@ -466,7 +486,7 @@
     return isToday ? hm : (d.getMonth()+1) + "/" + d.getDate() + " " + hm;
   }
 
-  function render() {
+  function render(skipAnim) {
     renderHeader();
     closeOpenRow(true);
     list.innerHTML = "";
@@ -485,7 +505,7 @@
     }
 
     const group = document.createElement("div");
-    group.className = "group";
+    group.className = "group" + (skipAnim ? " no-anim" : "");
 
     for (const t of shown) group.appendChild(buildRow(t));
     list.appendChild(group);
@@ -494,6 +514,7 @@
   function buildRow(t) {
     const row = document.createElement("div");
     row.className = "row" + (t.done ? " done" : "");
+    row.dataset.id = t.id;
 
     const del = document.createElement("button");
     del.className = "swipe-del";
@@ -507,7 +528,11 @@
     check.className = "check";
     check.setAttribute("aria-label", t.done ? "未完了に戻す" : "完了にする");
     check.innerHTML = '<svg viewBox="0 0 16 16" fill="none"><path d="M3 8.5L6.5 12L13 4.5" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-    check.addEventListener("click", (e) => { e.stopPropagation(); toggle(t.id); });
+    check.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (reordering || Date.now() - justDragged < 350) return;
+      toggle(t.id);
+    });
 
     const body = document.createElement("div");
     body.className = "task-body";
@@ -523,6 +548,7 @@
     row.append(del, content);
 
     attachSwipe(row, content);
+    attachDrag(row, content, t.id);
     return row;
   }
 
@@ -540,6 +566,7 @@
     const OPEN = -88;
 
     content.addEventListener("touchstart", (e) => {
+      if (reordering) return;
       if (openRow && openRow !== row) closeOpenRow(false);
       startX = e.touches[0].clientX;
       startY = e.touches[0].clientY;
@@ -549,7 +576,7 @@
     }, { passive: true });
 
     content.addEventListener("touchmove", (e) => {
-      if (!dragging) return;
+      if (!dragging || reordering) return;
       const mx = e.touches[0].clientX - startX;
       const my = e.touches[0].clientY - startY;
       if (horizontal === null) {
@@ -563,7 +590,7 @@
     }, { passive: true });
 
     content.addEventListener("touchend", () => {
-      if (!dragging) return;
+      if (!dragging || reordering) { dragging = false; return; }
       dragging = false;
       content.style.transition = "transform .25s cubic-bezier(.3,1,.4,1)";
       if (horizontal && dx < OPEN / 2) {
@@ -584,6 +611,147 @@
       content.style.transform = "translateX(-88px)";
       openRow = row;
     });
+  }
+
+  /* ---------- 長押しドラッグで並べ替え ---------- */
+  function attachDrag(row, content, id) {
+    let timer = null, active = false;
+    let startX = 0, startY = 0, curY = 0;
+    let rowH = 0, startIdx = 0, curIdx = 0;
+    let rows = [], group = null, scrollStart = 0;
+    const HOLD_MS = 280;
+
+    function cancelTimer() { if (timer) { clearTimeout(timer); timer = null; } }
+
+    function beginDrag() {
+      timer = null;
+      if (openRow) return;
+      group = row.parentElement;
+      rows = [...group.querySelectorAll(":scope > .row")];
+      startIdx = rows.indexOf(row);
+      curIdx = startIdx;
+      rowH = row.offsetHeight;
+      scrollStart = list.scrollTop;
+      active = true;
+      reordering = true;
+      group.classList.add("reordering");
+      row.classList.add("dragging");
+      updateDrag();
+      requestAnimationFrame(scrollLoop);
+    }
+
+    function dyNow() {
+      return (curY - startY) + (list.scrollTop - scrollStart);
+    }
+
+    function updateDrag() {
+      if (!active) return;
+      const dy = dyNow();
+      row.style.transform = "translateY(" + dy + "px)";
+      const newIdx = Math.max(0, Math.min(rows.length - 1, startIdx + Math.round(dy / rowH)));
+      if (newIdx !== curIdx) {
+        curIdx = newIdx;
+        rows.forEach((r, i) => {
+          if (r === row) return;
+          let off = 0;
+          if (i > startIdx && i <= curIdx) off = -rowH;
+          else if (i < startIdx && i >= curIdx) off = rowH;
+          r.style.transform = off ? "translateY(" + off + "px)" : "";
+        });
+      }
+    }
+
+    function scrollLoop() {
+      if (!active) return;
+      const r = list.getBoundingClientRect();
+      const zone = 80;
+      let v = 0;
+      if (curY < r.top + zone) v = -Math.min(14, (r.top + zone - curY) / 4);
+      else if (curY > r.bottom - zone) v = Math.min(14, (curY - (r.bottom - zone)) / 4);
+      if (v) { list.scrollTop += v; updateDrag(); }
+      requestAnimationFrame(scrollLoop);
+    }
+
+    function endDrag(cancelled) {
+      if (!active) return;
+      active = false;
+      justDragged = Date.now();
+      const from = startIdx, to = cancelled ? startIdx : curIdx;
+      // 目的位置へスナップさせてから確定
+      row.style.transition = "transform .18s cubic-bezier(.3,1,.4,1)";
+      row.style.transform = "translateY(" + ((to - from) * rowH) + "px)";
+      row.classList.remove("dragging");
+      setTimeout(() => {
+        reordering = false;
+        if (group) group.classList.remove("reordering");
+        if (from !== to) applyReorder(id, from, to, rows.map(r => r.dataset.id));
+        else render(true);
+      }, 190);
+    }
+
+    // タッチ操作
+    content.addEventListener("touchstart", (e) => {
+      if (openRow || reordering) return;
+      startX = e.touches[0].clientX;
+      startY = e.touches[0].clientY;
+      curY = startY;
+      cancelTimer();
+      timer = setTimeout(beginDrag, HOLD_MS);
+    }, { passive: true });
+
+    content.addEventListener("touchmove", (e) => {
+      const t = e.touches[0];
+      if (!active) {
+        // 長押し前に動いたら「スクロール/スワイプ」と判断してドラッグは中止
+        if (Math.abs(t.clientX - startX) > 8 || Math.abs(t.clientY - startY) > 8) cancelTimer();
+        return;
+      }
+      e.preventDefault(); // ドラッグ中は画面スクロールを止める
+      curY = t.clientY;
+      updateDrag();
+    }, { passive: false });
+
+    content.addEventListener("touchend", () => { cancelTimer(); endDrag(false); });
+    content.addEventListener("touchcancel", () => { cancelTimer(); endDrag(true); });
+
+    // マウス操作(PC): 長押しでドラッグ開始
+    content.addEventListener("mousedown", (e) => {
+      if (e.button !== 0 || openRow || reordering) return;
+      startX = e.clientX; startY = e.clientY; curY = startY;
+      cancelTimer();
+      timer = setTimeout(beginDrag, HOLD_MS);
+      const move = (ev) => {
+        if (!active) {
+          if (Math.abs(ev.clientX - startX) > 8 || Math.abs(ev.clientY - startY) > 8) cancelTimer();
+          return;
+        }
+        ev.preventDefault();
+        curY = ev.clientY;
+        updateDrag();
+      };
+      const up = () => {
+        cancelTimer();
+        endDrag(false);
+        document.removeEventListener("mousemove", move);
+        document.removeEventListener("mouseup", up);
+      };
+      document.addEventListener("mousemove", move);
+      document.addEventListener("mouseup", up);
+    });
+  }
+
+  /* ---------- 並べ替えの確定(フィルター表示中でも全体の順序を保つ) ---------- */
+  function applyReorder(id, from, to, shownIds) {
+    const newShown = [...shownIds];
+    newShown.splice(from, 1);
+    newShown.splice(to, 0, id);
+    const shownSet = new Set(shownIds);
+    const queue = [...newShown];
+    const byId = {};
+    tasks.forEach(t => { byId[t.id] = t; });
+    tasks = tasks.map(t => shownSet.has(t.id) ? byId[queue.shift()] : t);
+    save();
+    render(true);
   }
 
   /* ---------- 操作 ---------- */
