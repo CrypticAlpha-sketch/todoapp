@@ -325,6 +325,9 @@
     font-family: inherit;
     cursor: pointer;
   }
+  /* リストの角丸から赤がはみ出て見えないよう、端の行のボタンにも同じ角丸を付ける */
+  .row:first-child .swipe-del { border-top-right-radius: 16px; }
+  .row:last-child .swipe-del { border-bottom-right-radius: 16px; }
 
   .check {
     flex: none;
@@ -485,6 +488,7 @@
   let openRow = null;     // 現在スワイプで開いている行
   let reordering = false; // ドラッグ並べ替え中
   let justDragged = 0;    // ドラッグ直後の誤タップ防止用タイムスタンプ
+  let lastScrollTs = 0;   // 直近のスクロール時刻(スクロール中のスワイプ誤発動防止)
 
   /* ---------- ストレージ層 ---------- */
   const store = {
@@ -582,7 +586,11 @@
       moreChip.classList.remove("show");
     }
   }
-  list.addEventListener("scroll", updateScrollHints, { passive: true });
+  list.addEventListener("scroll", () => {
+    lastScrollTs = Date.now();
+    if (openRow && !reordering) closeOpenRow(false); // スクロールしたら開いた削除ボタンを閉じる
+    updateScrollHints();
+  }, { passive: true });
   window.addEventListener("resize", updateScrollHints);
   moreChip.addEventListener("click", () => {
     list.scrollTo({ top: list.scrollHeight, behavior: "smooth" });
@@ -673,6 +681,11 @@
     openRow = null;
   }
 
+  // 開いた削除ボタンは、リスト外のどこかをタップしても閉じる
+  document.addEventListener("touchstart", (e) => {
+    if (openRow && !reordering && !openRow.contains(e.target)) closeOpenRow(false);
+  }, { passive: true });
+
   function attachSwipe(row, content) {
     let startX = 0, startY = 0, dx = 0, dragging = false, horizontal = null;
     const OPEN = -88;
@@ -694,7 +707,8 @@
       if (horizontal === null) {
         if (Math.abs(mx) < 10 && Math.abs(my) < 10) return;
         // 明確に横方向の動きだけをスワイプと判定(斜めスクロールでの誤発動防止)
-        horizontal = Math.abs(mx) > Math.abs(my) * 1.4;
+        // さらにスクロール直後(慣性スクロール中)はスワイプとみなさない
+        horizontal = Math.abs(mx) > Math.abs(my) * 1.4 && Date.now() - lastScrollTs > 150;
       }
       if (!horizontal) return;
       e.preventDefault(); // スワイプ確定中は縦スクロールを止めて赤ボタンのチラつきを防ぐ
