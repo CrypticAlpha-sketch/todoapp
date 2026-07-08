@@ -494,9 +494,34 @@
   }
   .sheet-title {
     font-size: 16px; font-weight: 700;
-    margin-bottom: 14px;
+    margin-bottom: 4px;
     word-break: break-word;
   }
+  .sheet-caption {
+    font-size: 12.5px;
+    color: var(--ink-3);
+    margin-bottom: 14px;
+  }
+  .quick-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  .quick-chip {
+    flex: 1;
+    padding: 11px 0;
+    border: none;
+    border-radius: 11px;
+    background: var(--input-bg);
+    color: var(--ink);
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background .15s, color .15s, transform .1s;
+  }
+  .quick-chip:active { transform: scale(.95); }
+  .quick-chip.active { background: var(--tint); color: #fff; }
   .sheet-row {
     display: flex; align-items: center; justify-content: space-between;
     background: var(--input-bg);
@@ -625,13 +650,18 @@
 <div class="sheet" id="editSheet" hidden>
   <div class="sheet-handle"></div>
   <div class="sheet-title" id="sheetTitle"></div>
+  <div class="sheet-caption">期限を選ぶとすぐに反映されます</div>
+  <div class="quick-row">
+    <button class="quick-chip" data-days="0">今日</button>
+    <button class="quick-chip" data-days="1">明日</button>
+    <button class="quick-chip" data-days="7">来週</button>
+  </div>
   <label class="sheet-row">
-    <span>期限</span>
+    <span>日付を指定</span>
     <input type="date" id="sheetDate">
   </label>
-  <button class="sheet-btn primary" id="sheetSave">保存</button>
   <button class="sheet-btn danger" id="sheetClear">期限を削除</button>
-  <button class="sheet-btn" id="sheetCancel">キャンセル</button>
+  <button class="sheet-btn primary" id="sheetDone">完了</button>
 </div>
 
 <script>
@@ -1207,14 +1237,32 @@
   const sheetBackdrop = document.getElementById("sheetBackdrop");
   const sheetTitle = document.getElementById("sheetTitle");
   const sheetDate = document.getElementById("sheetDate");
+  const sheetClear = document.getElementById("sheetClear");
+  const quickChips = [...document.querySelectorAll(".quick-chip")];
+
+  function isoOffset(days) {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() + days);
+    return d.getFullYear() + "-" +
+      String(d.getMonth() + 1).padStart(2, "0") + "-" +
+      String(d.getDate()).padStart(2, "0");
+  }
+
+  function refreshSheet(t) {
+    sheetDate.value = t.due || "";
+    sheetClear.style.display = t.due ? "" : "none";
+    quickChips.forEach(ch => {
+      ch.classList.toggle("active", !!t.due && t.due === isoOffset(Number(ch.dataset.days)));
+    });
+  }
 
   function openSheet(id) {
     const t = tasks.find(x => x.id === id);
     if (!t) return;
     editingId = id;
     sheetTitle.textContent = t.text;
-    sheetDate.value = t.due || "";
-    document.getElementById("sheetClear").style.display = t.due ? "" : "none";
+    refreshSheet(t);
     sheetBackdrop.hidden = false;
     editSheet.hidden = false;
     requestAnimationFrame(() => {
@@ -1222,32 +1270,64 @@
       editSheet.classList.add("show");
     });
   }
+
   function closeSheet() {
     sheetBackdrop.classList.remove("show");
     editSheet.classList.remove("show");
+    editSheet.style.transform = ""; // スワイプ中の位置からそのまま下へアニメーション
     setTimeout(() => {
       sheetBackdrop.hidden = true;
       editSheet.hidden = true;
       editingId = null;
-    }, 300);
+    }, 320);
   }
-  document.getElementById("sheetSave").addEventListener("click", () => {
+
+  /* 選んだ瞬間に反映(保存ボタン不要) */
+  function applyDue(val) {
     const t = tasks.find(x => x.id === editingId);
-    if (t) {
-      if (sheetDate.value) t.due = sheetDate.value;
-      else delete t.due;
-      save();
-      render(true);
-    }
-    closeSheet();
+    if (!t) return;
+    if (val) t.due = val;
+    else delete t.due;
+    save();
+    render(true);      // 背後のリストが即座に並び変わるのが見える
+    refreshSheet(t);
+  }
+
+  quickChips.forEach(ch => {
+    ch.addEventListener("click", () => applyDue(isoOffset(Number(ch.dataset.days))));
   });
-  document.getElementById("sheetClear").addEventListener("click", () => {
-    const t = tasks.find(x => x.id === editingId);
-    if (t) { delete t.due; save(); render(true); }
-    closeSheet();
-  });
-  document.getElementById("sheetCancel").addEventListener("click", closeSheet);
+  sheetDate.addEventListener("change", () => applyDue(sheetDate.value));
+  sheetClear.addEventListener("click", () => { applyDue(""); closeSheet(); });
+  document.getElementById("sheetDone").addEventListener("click", closeSheet);
   sheetBackdrop.addEventListener("click", closeSheet);
+
+  /* 下スワイプでシートを閉じる */
+  (function () {
+    let sy = 0, dy = 0, draggingSheet = false;
+    editSheet.addEventListener("touchstart", (e) => {
+      if (e.target.closest("input, button")) return; // 操作部品の上では無効
+      sy = e.touches[0].clientY;
+      dy = 0;
+      draggingSheet = true;
+      editSheet.style.transition = "none";
+    }, { passive: true });
+    editSheet.addEventListener("touchmove", (e) => {
+      if (!draggingSheet) return;
+      dy = Math.max(0, e.touches[0].clientY - sy);
+      editSheet.style.transform = "translateY(" + dy + "px)";
+    }, { passive: true });
+    editSheet.addEventListener("touchend", () => {
+      if (!draggingSheet) return;
+      draggingSheet = false;
+      editSheet.style.transition = "";
+      if (dy > 80) {
+        closeSheet();
+      } else {
+        editSheet.style.transform = ""; // 元の位置へ戻る
+      }
+      dy = 0;
+    });
+  })();
 
   document.getElementById("addBtn").addEventListener("click", add);
   input.addEventListener("keydown", e => { if (e.key === "Enter") add(); });
