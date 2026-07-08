@@ -182,6 +182,13 @@
   .seg button.active { color: var(--ink); }
 
   /* ================= List ================= */
+  .list-wrap {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
   main {
     flex: 1;
     overflow-y: auto;
@@ -189,6 +196,58 @@
     padding: 2px 16px 20px;
     -webkit-overflow-scrolling: touch;
   }
+  /* PC用の細いスクロールバー */
+  main::-webkit-scrollbar { width: 7px; }
+  main::-webkit-scrollbar-thumb { background: var(--ink-4); border-radius: 4px; }
+  main::-webkit-scrollbar-track { background: transparent; }
+
+  /* スクロール可能なことを示す端のフェード */
+  .fade {
+    position: absolute;
+    left: 0; right: 0;
+    height: 30px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity .25s ease;
+    z-index: 3;
+  }
+  .fade-top { top: 0; background: linear-gradient(to bottom, var(--bg), transparent); }
+  .fade-bottom { bottom: 0; background: linear-gradient(to top, var(--bg), transparent); }
+  .fade.show { opacity: 1; }
+
+  /* 「あと n 件」チップ */
+  .more-chip {
+    position: absolute;
+    bottom: 12px;
+    left: 50%;
+    transform: translateX(-50%) translateY(8px);
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 8px 14px;
+    border: 0.5px solid var(--separator);
+    border-radius: 999px;
+    background: var(--blur-bg);
+    -webkit-backdrop-filter: blur(20px) saturate(1.8);
+    backdrop-filter: blur(20px) saturate(1.8);
+    color: var(--ink-2);
+    font-family: inherit;
+    font-size: 12.5px;
+    font-weight: 600;
+    box-shadow: 0 4px 16px rgba(0,0,0,.16);
+    cursor: pointer;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .25s ease, transform .25s ease;
+    z-index: 4;
+  }
+  .more-chip.show {
+    opacity: 1;
+    transform: translateX(-50%);
+    pointer-events: auto;
+  }
+  .more-chip svg { width: 12px; height: 12px; }
+
   .group {
     background: var(--card);
     border-radius: 16px;
@@ -399,7 +458,15 @@
   </div>
 </div>
 
-<main id="list"></main>
+<div class="list-wrap">
+  <main id="list"></main>
+  <div class="fade fade-top" id="fadeTop"></div>
+  <div class="fade fade-bottom" id="fadeBottom"></div>
+  <button class="more-chip" id="moreChip">
+    <span id="moreChipText">あと0件</span>
+    <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5.5L7 9.5L11 5.5"/></svg>
+  </button>
+</div>
 
 <div class="input-bar">
   <input id="newTask" type="text" placeholder="新規ToDo..." enterkeyhint="done" autocomplete="off">
@@ -490,6 +557,36 @@
 
   /* ---------- リスト ---------- */
   const list = document.getElementById("list");
+  const fadeTop = document.getElementById("fadeTop");
+  const fadeBottom = document.getElementById("fadeBottom");
+  const moreChip = document.getElementById("moreChip");
+  const moreChipText = document.getElementById("moreChipText");
+
+  function updateScrollHints() {
+    const above = list.scrollTop > 8;
+    const below = list.scrollTop + list.clientHeight < list.scrollHeight - 8;
+    fadeTop.classList.toggle("show", above);
+    fadeBottom.classList.toggle("show", below);
+
+    let hidden = 0;
+    if (below) {
+      const limit = list.getBoundingClientRect().bottom - 24;
+      list.querySelectorAll(".row").forEach(r => {
+        if (r.getBoundingClientRect().top > limit) hidden++;
+      });
+    }
+    if (below && hidden > 0 && !reordering) {
+      moreChipText.textContent = "あと" + hidden + "件";
+      moreChip.classList.add("show");
+    } else {
+      moreChip.classList.remove("show");
+    }
+  }
+  list.addEventListener("scroll", updateScrollHints, { passive: true });
+  window.addEventListener("resize", updateScrollHints);
+  moreChip.addEventListener("click", () => {
+    list.scrollTo({ top: list.scrollHeight, behavior: "smooth" });
+  });
 
   function fmtTime(ts) {
     const d = new Date(ts);
@@ -514,6 +611,7 @@
         ? '<div class="icon">' + ICONS.note + '</div><strong>ToDoはありません</strong><p>下の入力欄から追加できます</p>'
         : '<div class="icon">' + ICONS.search + '</div><strong>ここには何もありません</strong><p>フィルターを切り替えてみてください</p>';
       list.appendChild(div);
+      requestAnimationFrame(updateScrollHints);
       return;
     }
 
@@ -522,6 +620,7 @@
 
     for (const t of shown) group.appendChild(buildRow(t));
     list.appendChild(group);
+    requestAnimationFrame(updateScrollHints);
   }
 
   function buildRow(t) {
@@ -593,14 +692,16 @@
       const mx = e.touches[0].clientX - startX;
       const my = e.touches[0].clientY - startY;
       if (horizontal === null) {
-        if (Math.abs(mx) < 6 && Math.abs(my) < 6) return;
-        horizontal = Math.abs(mx) > Math.abs(my);
+        if (Math.abs(mx) < 10 && Math.abs(my) < 10) return;
+        // 明確に横方向の動きだけをスワイプと判定(斜めスクロールでの誤発動防止)
+        horizontal = Math.abs(mx) > Math.abs(my) * 1.4;
       }
       if (!horizontal) return;
+      e.preventDefault(); // スワイプ確定中は縦スクロールを止めて赤ボタンのチラつきを防ぐ
       const base = (openRow === row) ? OPEN : 0;
       dx = Math.min(0, Math.max(OPEN * 1.6, base + mx));
       content.style.transform = "translateX(" + dx + "px)";
-    }, { passive: true });
+    }, { passive: false });
 
     content.addEventListener("touchend", () => {
       if (!dragging || reordering) { dragging = false; return; }
@@ -647,6 +748,7 @@
       scrollStart = list.scrollTop;
       active = true;
       reordering = true;
+      moreChip.classList.remove("show");
       group.classList.add("reordering");
       row.classList.add("dragging");
       applyShapes();
