@@ -501,15 +501,24 @@
     background: var(--ink-4);
     margin: 4px auto 14px;
   }
-  .sheet-title {
-    font-size: 16px; font-weight: 700;
-    margin-bottom: 4px;
-    word-break: break-word;
+  .sheet-input {
+    display: block;
+    width: 100%;
+    border: none;
+    border-radius: 12px;
+    background: var(--input-bg);
+    color: var(--ink);
+    font-family: inherit;
+    font-size: 16px;
+    font-weight: 600;
+    padding: 12px 14px;
+    margin-bottom: 8px;
   }
+  .sheet-input:focus { outline: 2px solid var(--tint); }
   .sheet-caption {
     font-size: 12.5px;
     color: var(--ink-3);
-    margin-bottom: 14px;
+    margin: 0 2px 14px;
   }
   .quick-row {
     display: flex;
@@ -667,8 +676,8 @@
 <div class="sheet-backdrop" id="sheetBackdrop" hidden></div>
 <div class="sheet" id="editSheet" hidden>
   <div class="sheet-handle"></div>
-  <div class="sheet-title" id="sheetTitle"></div>
-  <div class="sheet-caption">期限を選ぶとすぐに反映されます</div>
+  <input type="text" class="sheet-input" id="sheetName" placeholder="タスク名" enterkeyhint="done" autocomplete="off">
+  <div class="sheet-caption">変更はすぐに反映されます</div>
   <div class="quick-row">
     <button class="quick-chip" data-days="0">今日</button>
     <button class="quick-chip" data-days="1">明日</button>
@@ -1296,10 +1305,24 @@
   let editingId = null;
   const editSheet = document.getElementById("editSheet");
   const sheetBackdrop = document.getElementById("sheetBackdrop");
-  const sheetTitle = document.getElementById("sheetTitle");
+  const sheetName = document.getElementById("sheetName");
   const sheetDate = document.getElementById("sheetDate");
   const sheetClear = document.getElementById("sheetClear");
   const quickChips = [...document.querySelectorAll(".quick-chip")];
+
+  /* タスク名の編集(入力するそばから反映。空文字では上書きしない) */
+  sheetName.addEventListener("input", () => {
+    const t = tasks.find(x => x.id === editingId);
+    if (!t) return;
+    const v = sheetName.value.trim();
+    if (!v) return;
+    t.text = v;
+    save();
+    render(true);
+  });
+  sheetName.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") sheetName.blur(); // キーボードを閉じる
+  });
 
   function isoOffset(days) {
     const d = new Date();
@@ -1322,7 +1345,7 @@
     const t = tasks.find(x => x.id === id);
     if (!t) return;
     editingId = id;
-    sheetTitle.textContent = t.text;
+    sheetName.value = t.text;
     refreshSheet(t);
     sheetBackdrop.hidden = false;
     editSheet.hidden = false;
