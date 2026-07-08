@@ -324,7 +324,9 @@
     font-weight: 600;
     font-family: inherit;
     cursor: pointer;
+    visibility: hidden; /* 通常時は完全非表示。スワイプ確定時のみ見せる */
   }
+  .row.swiping .swipe-del { visibility: visible; }
   /* リストの角丸から赤がはみ出て見えないよう、端の行のボタンにも同じ角丸を付ける */
   .row:first-child .swipe-del { border-top-right-radius: 16px; }
   .row:last-child .swipe-del { border-bottom-right-radius: 16px; }
@@ -675,10 +677,13 @@
   /* ---------- スワイプで削除 ---------- */
   function closeOpenRow(instant) {
     if (!openRow) return;
-    const c = openRow.querySelector(".swipe-content");
+    const r = openRow;
+    const c = r.querySelector(".swipe-content");
     c.style.transition = instant ? "none" : "transform .25s cubic-bezier(.3,1,.4,1)";
     c.style.transform = "translateX(0)";
     openRow = null;
+    if (instant) r.classList.remove("swiping");
+    else setTimeout(() => { if (openRow !== r) r.classList.remove("swiping"); }, 270);
   }
 
   // 開いた削除ボタンは、リスト外のどこかをタップしても閉じる
@@ -708,9 +713,10 @@
         if (Math.abs(mx) < 10 && Math.abs(my) < 10) return;
         // 明確に横方向の動きだけをスワイプと判定(斜めスクロールでの誤発動防止)
         // さらにスクロール直後(慣性スクロール中)はスワイプとみなさない
-        horizontal = Math.abs(mx) > Math.abs(my) * 1.4 && Date.now() - lastScrollTs > 150;
+        horizontal = Math.abs(mx) > Math.abs(my) * 1.6 && Date.now() - lastScrollTs > 150;
       }
       if (!horizontal) return;
+      row.classList.add("swiping"); // スワイプ確定時のみ赤ボタンを表示
       e.preventDefault(); // スワイプ確定中は縦スクロールを止めて赤ボタンのチラつきを防ぐ
       const base = (openRow === row) ? OPEN : 0;
       dx = Math.min(0, Math.max(OPEN * 1.6, base + mx));
@@ -727,6 +733,8 @@
       } else {
         content.style.transform = "translateX(0)";
         if (openRow === row) openRow = null;
+        // 閉じるアニメーション完了後に赤ボタンを非表示へ戻す
+        setTimeout(() => { if (openRow !== row) row.classList.remove("swiping"); }, 270);
       }
       dx = 0;
     });
@@ -735,6 +743,7 @@
     content.addEventListener("dblclick", () => {
       if (openRow === row) { closeOpenRow(false); return; }
       if (openRow) closeOpenRow(false);
+      row.classList.add("swiping");
       content.style.transition = "transform .25s cubic-bezier(.3,1,.4,1)";
       content.style.transform = "translateX(-88px)";
       openRow = row;
