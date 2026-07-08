@@ -255,6 +255,15 @@
     box-shadow: var(--shadow);
     transition: background .3s ease;
   }
+  .section-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--ink-3);
+    letter-spacing: .02em;
+    padding: 18px 8px 8px;
+  }
+  .section-title:first-child { padding-top: 6px; }
+  .section-title.overdue { color: var(--red); }
   .row {
     position: relative;
     overflow: hidden;
@@ -753,16 +762,37 @@
 
   /* 期限の表示: 期限切れ/今日/明日/日付 */
   const CAL_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3.5" y="5" width="17" height="15.5" rx="3"/><path d="M3.5 9.5h17M8 3v3.5M16 3v3.5"/></svg>';
-  function fmtDue(due) {
+  function dueDiff(due) {
     const [y, m, d] = due.split("-").map(Number);
     const target = new Date(y, m - 1, d);
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const diff = Math.round((target - today) / 86400000);
+    return Math.round((target - today) / 86400000);
+  }
+  function fmtDue(due) {
+    const [, m, d] = due.split("-").map(Number);
+    const diff = dueDiff(due);
     if (diff < 0)  return { text: m + "/" + d + " 期限切れ", cls: "overdue" };
     if (diff === 0) return { text: "今日まで", cls: "today" };
     if (diff === 1) return { text: "明日まで", cls: "" };
     return { text: m + "/" + d + "まで", cls: "" };
+  }
+
+  /* 期限によるグループ分け */
+  const SECTIONS = [
+    ["overdue",  "期限切れ"],
+    ["today",    "今日"],
+    ["tomorrow", "明日"],
+    ["later",    "今後"],
+    ["none",     "期限なし"]
+  ];
+  function dueGroupKey(t) {
+    if (!t.due) return "none";
+    const diff = dueDiff(t.due);
+    if (diff < 0) return "overdue";
+    if (diff === 0) return "today";
+    if (diff === 1) return "tomorrow";
+    return "later";
   }
 
   function render(skipAnim) {
@@ -784,11 +814,25 @@
       return;
     }
 
-    const group = document.createElement("div");
-    group.className = "group" + (skipAnim ? " no-anim" : "");
+    // 期限ごとにグループ分けして表示
+    const buckets = { overdue: [], today: [], tomorrow: [], later: [], none: [] };
+    for (const t of shown) buckets[dueGroupKey(t)].push(t);
+    const activeSections = SECTIONS.filter(([k]) => buckets[k].length > 0);
+    // 期限付きタスクが1つもないときは「期限なし」の見出しを出さない
+    const onlyNone = activeSections.length === 1 && activeSections[0][0] === "none";
 
-    for (const t of shown) group.appendChild(buildRow(t));
-    list.appendChild(group);
+    for (const [key, label] of activeSections) {
+      if (!onlyNone) {
+        const h = document.createElement("div");
+        h.className = "section-title" + (key === "overdue" ? " overdue" : "");
+        h.textContent = label;
+        list.appendChild(h);
+      }
+      const group = document.createElement("div");
+      group.className = "group" + (skipAnim ? " no-anim" : "");
+      for (const t of buckets[key]) group.appendChild(buildRow(t));
+      list.appendChild(group);
+    }
     requestAnimationFrame(updateScrollHints);
   }
 
